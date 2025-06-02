@@ -18,6 +18,11 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Install .NET
+    - name: Setup .NET ${{ inputs.dotnet-version }}
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '${{ inputs.dotnet-version }}'
 
     # Install Windows SDK
     - name: Install Windows SDK ${{ inputs.sdkVersion }}
