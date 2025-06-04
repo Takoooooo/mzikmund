@@ -12,6 +12,7 @@ inputs:
     default: '22621'
 
 runs:
+  using: "composite"
   steps:
 
     # Run Uno.Check
