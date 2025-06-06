@@ -1,75 +1,78 @@
 name: Install Dependencies
-description: ""
+description: Installs SDKs & local Uno.Check
 
 inputs:
   target-platform:
-    description: 'The platform to install dependencies for. #See available values at https://platform.uno/docs/articles/external/uno.check/doc/using-uno-check.html'
+    description: 'See available values at https://platform.uno/docs/articles/external/uno.check/doc/using-uno-check.html'
     required: false
     default: 'all'
   dotnet-version:
-    description: 'Installs and sets the .NET SDK Version'
+    description: '.NET SDK version'
     required: false
     default: '9.0.x'
   sdkVersion:
-    description: 'The version of the Windows Sdk'
+    description: 'Windows SDK version'
     required: false
     default: '22621'
 
 runs:
-  using: "composite"
+  using: composite
   steps:
-    # Install .NET
+
+    # ─── .NET SDK ───────────────────────────────────────────────────────
     - name: Setup .NET ${{ inputs.dotnet-version }}
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: '${{ inputs.dotnet-version }}'
+        dotnet-version: ${{ inputs.dotnet-version }}
 
-    - name: Publish uno.check nupkg
-      uses: actions/upload-artifact@v3
+    # ─── Publish Uno.Check nupkg (only keep if this job builds the file) ─
+    - name: Publish Uno.Check nupkg
+      if: ${{ runner.os == 'Linux' }}          # guard if you only build on one runner
+      uses: actions/upload-artifact@v4         # ← updated to v4
       with:
         name: uno-check-nupkg
-        path: .\.github\Uno.Check.1.0.0.nupkg
+        path: .github/Uno.Check.1.0.0.nupkg    # make sure this path is correct
 
-
-    # Install Windows SDK
+    # ─── Windows SDK ────────────────────────────────────────────────────
     - name: Install Windows SDK ${{ inputs.sdkVersion }}
+      if:   ${{ runner.os == 'Windows' }}
       shell: pwsh
-      if: ${{ runner.os == 'Windows' }}
-      run: .\.github\Install-WindowsSdkISO.ps1 ${{ inputs.sdkVersion }}
+      run: .github/Install-WindowsSdkISO.ps1 ${{ inputs.sdkVersion }}
 
-    # Run Uno.Check
-    # ─── Run Uno.Check (from *your* nupkg) ──────────────────────────────────────
-    - name: Install ${{ inputs.target-platform }} Workloads (local uno.check)
+    # ─── Download Uno.Check nupkg built in a previous job/step ──────────
+    - name: Download Uno.Check nupkg artifact
+      uses: actions/download-artifact@v4       # ← updated to v4
+      with:
+        name: uno-check-nupkg
+        path: ./local_nupkgs
+
+    # ─── Install workloads with *your* Uno.Check build ──────────────────
+    - name: Install ${{ inputs.target-platform }} workloads (local Uno.Check)
       shell: pwsh
       run: |
-        # 1️⃣  Remove any marketplace version that might already be on the agent
-        dotnet tool uninstall -g uno.check 2>$null || echo "uno.check not previously installed"
+        # Uninstall any marketplace copy
+        dotnet tool uninstall -g uno.check 2>$null || echo "No pre-installed uno.check"
 
-        # 2️⃣  Pull the nupkg produced by an earlier job
-        echo "Downloading uno-check nupkg artifact…"
-        # actions/download-artifact writes to the current working dir by default
-        # We invoke it with the GHA-provided helper so we stay in the same step
-        gh-actions-download-artifact `
-            -name "uno-check-nupkg" `
-            -path "./local_nupkgs"
+        # Find the nupkg we just downloaded
+        $pkg = Get-ChildItem ./local_nupkgs -Filter 'Uno.Check.*.nupkg' | Select-Object -First 1
+        if (-not $pkg) { throw 'Uno.Check nupkg not found!' }
 
-        # 3️⃣  Install the tool from the local folder (no NuGet.org hit)
-        $pkgPath = Get-ChildItem "./local_nupkgs" -Filter "uno.check.*.nupkg" | Select-Object -First 1
-        if (-not $pkgPath) { throw "uno.check nupkg not found!" }
-
+        # Install it as a global tool
         dotnet tool install -g uno.check `
-            --add-source $pkgPath.DirectoryName `
-            --version 1.0.0 `
-            --ignore-failed-sources      # avoids trying NuGet.org if we’re offline
+              --add-source $pkg.DirectoryName `
+              --version 1.0.0 `
+              --ignore-failed-sources
 
         dotnet tool list -g
 
-        # 4️⃣  Run uno-check exactly like before
-        ("${{ inputs.target-platform }} ".Split(' ') | ForEach-Object {
-          $target = $_.Replace("_win", "").Replace("_macos", "")
-          if (![string]::IsNullOrEmpty($target)) {
-            echo "target: $target"
-            uno-check -v --ci --non-interactive --fix --target $target --skip vswin --skip vsmac --skip xcode --skip vswinworkloads --skip androidemulator --skip dotnetnewunotemplates
-            echo "uno-check finished for target: $target "
+        # Run Uno.Check
+        ($env:INPUT_TARGET_PLATFORM -split ' ') | ForEach-Object {
+          $t = $_.Replace('_win','').Replace('_macos','')
+          if ($t) {
+            Write-Host "==> uno-check target: $t"
+            uno-check -v --ci --non-interactive --fix --target $t `
+                      --skip vswin --skip vsmac --skip xcode `
+                      --skip vswinworkloads --skip androidemulator `
+                      --skip dotnetnewunotemplates
           }
-        })
+        }
