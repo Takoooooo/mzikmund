@@ -18,61 +18,20 @@ inputs:
 runs:
   using: composite
   steps:
+  - uses: actions/checkout@v3
 
-    # ─── .NET SDK ───────────────────────────────────────────────────────
-    - name: Setup .NET ${{ inputs.dotnet-version }}
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: ${{ inputs.dotnet-version }}
+  - name: Setup .NET 9
+    uses: actions/setup-dotnet@v3
+    with:
+      dotnet-version: 9.0.x
 
-    # ─── Publish Uno.Check nupkg (only keep if this job builds the file) ─
-    - name: Publish Uno.Check nupkg
-      if: ${{ runner.os == 'Linux' }}          # guard if you only build on one runner
-      uses: actions/upload-artifact@v4         # ← updated to v4
-      with:
-        name: uno-check-nupkg
-        path: .github/Uno.Check.1.0.0.nupkg    # make sure this path is correct
+  - name: Install Uno.Check from repo copy
+    shell: pwsh
+    run: |
+      $nupkgDir = "$env:GITHUB_WORKSPACE/.github"
+      dotnet tool install -g uno.check `
+           --add-source $nupkgDir `
+           --version 1.0.0 `
+           --ignore-failed-sources
+      uno-check -v --ci --non-interactive --fix --target all --skip vswin --skip vsmac --skip xcode --skip vswinworkloads --skip androidemulator --skip dotnetnewunotemplates
 
-    # ─── Windows SDK ────────────────────────────────────────────────────
-    - name: Install Windows SDK ${{ inputs.sdkVersion }}
-      if:   ${{ runner.os == 'Windows' }}
-      shell: pwsh
-      run: .github/Install-WindowsSdkISO.ps1 ${{ inputs.sdkVersion }}
-
-    # ─── Download Uno.Check nupkg built in a previous job/step ──────────
-    - name: Download Uno.Check nupkg artifact
-      uses: actions/download-artifact@v4       # ← updated to v4
-      with:
-        name: uno-check-nupkg
-        path: ./local_nupkgs
-
-    # ─── Install workloads with *your* Uno.Check build ──────────────────
-    - name: Install ${{ inputs.target-platform }} workloads (local Uno.Check)
-      shell: pwsh
-      run: |
-        # Uninstall any marketplace copy
-        dotnet tool uninstall -g uno.check 2>$null || echo "No pre-installed uno.check"
-
-        # Find the nupkg we just downloaded
-        $pkg = Get-ChildItem ./local_nupkgs -Filter 'Uno.Check.*.nupkg' | Select-Object -First 1
-        if (-not $pkg) { throw 'Uno.Check nupkg not found!' }
-
-        # Install it as a global tool
-        dotnet tool install -g uno.check `
-              --add-source $pkg.DirectoryName `
-              --version 1.0.0 `
-              --ignore-failed-sources
-
-        dotnet tool list -g
-
-        # Run Uno.Check
-        ($env:INPUT_TARGET_PLATFORM -split ' ') | ForEach-Object {
-          $t = $_.Replace('_win','').Replace('_macos','')
-          if ($t) {
-            Write-Host "==> uno-check target: $t"
-            uno-check -v --ci --non-interactive --fix --target $t `
-                      --skip vswin --skip vsmac --skip xcode `
-                      --skip vswinworkloads --skip androidemulator `
-                      --skip dotnetnewunotemplates
-          }
-        }
