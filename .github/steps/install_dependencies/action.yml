@@ -24,6 +24,13 @@ runs:
       with:
         dotnet-version: '${{ inputs.dotnet-version }}'
 
+    - name: Publish uno.check nupkg
+      uses: actions/upload-artifact@v3
+      with:
+        name: uno-check-nupkg
+        path: .\.github\Uno.Check.1.0.0.nupkg
+
+
     # Install Windows SDK
     - name: Install Windows SDK ${{ inputs.sdkVersion }}
       shell: pwsh
@@ -31,10 +38,35 @@ runs:
       run: .\.github\Install-WindowsSdkISO.ps1 ${{ inputs.sdkVersion }}
 
     # Run Uno.Check
-    - name: Install ${{ inputs.target-platform }} Workloads
+    # ─── Run Uno.Check (from *your* nupkg) ──────────────────────────────────────
+    - name: Install ${{ inputs.target-platform }} Workloads (local uno.check)
       shell: pwsh
+      env:
+        UNO_CHECK_VERSION: ${{ vars.UNO_CHECK_VERSION }}   # or ${{ secrets.UNO_CHECK_VERSION }}
       run: |
-        dotnet tool install -g uno.check --version 1.28.3
+        # 1️⃣  Remove any marketplace version that might already be on the agent
+        dotnet tool uninstall -g uno.check 2>$null || echo "uno.check not previously installed"
+
+        # 2️⃣  Pull the nupkg produced by an earlier job
+        echo "Downloading uno-check nupkg artifact…"
+        # actions/download-artifact writes to the current working dir by default
+        # We invoke it with the GHA-provided helper so we stay in the same step
+        gh-actions-download-artifact `
+            -name "uno-check-nupkg" `
+            -path "./local_nupkgs"
+
+        # 3️⃣  Install the tool from the local folder (no NuGet.org hit)
+        $pkgPath = Get-ChildItem "./local_nupkgs" -Filter "uno.check.*.nupkg" | Select-Object -First 1
+        if (-not $pkgPath) { throw "uno.check nupkg not found!" }
+
+        dotnet tool install -g uno.check `
+            --add-source $pkgPath.DirectoryName `
+            --version $env:UNO_CHECK_VERSION `
+            --ignore-failed-sources      # avoids trying NuGet.org if we’re offline
+
+        dotnet tool list -g
+
+        # 4️⃣  Run uno-check exactly like before
         ("${{ inputs.target-platform }} ".Split(' ') | ForEach-Object {
           $target = $_.Replace("_win", "").Replace("_macos", "")
           if (![string]::IsNullOrEmpty($target)) {
