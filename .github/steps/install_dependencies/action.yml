@@ -41,8 +41,6 @@ runs:
     # ─── Run Uno.Check (from *your* nupkg) ──────────────────────────────────────
     - name: Install ${{ inputs.target-platform }} Workloads (local uno.check)
       shell: pwsh
-      env:
-        UNO_CHECK_VERSION: ${{ vars.UNO_CHECK_VERSION }}   # or ${{ secrets.UNO_CHECK_VERSION }}
       run: |
         # 1️⃣  Remove any marketplace version that might already be on the agent
         dotnet tool uninstall -g uno.check 2>$null || echo "uno.check not previously installed"
@@ -61,7 +59,7 @@ runs:
 
         dotnet tool install -g uno.check `
             --add-source $pkgPath.DirectoryName `
-            --version $env:UNO_CHECK_VERSION `
+            --version 1.0.0 `
             --ignore-failed-sources      # avoids trying NuGet.org if we’re offline
 
         dotnet tool list -g
